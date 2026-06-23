@@ -4,15 +4,13 @@ import unicodedata
 import os
 
 import pandas as pd
-import nltk
-from nltk.tokenize import sent_tokenize
+import spacy
 
 from indicnlp.tokenize import sentence_tokenize
 from indicnlp.tokenize import indic_tokenize
 
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment
-from openpyxl.utils import get_column_letter
 
 
 # =====================================================
@@ -22,22 +20,14 @@ from openpyxl.utils import get_column_letter
 DATA_DIR = Path("data")
 OUTPUT_DIR = Path("output")
 
-MEITEI_SENTENCE_DELIM = re.compile(r"[꯫]")
+MEITEI_SENTENCE_DELIM = r"[꯫]"
 
 
 # =====================================================
-# NLTK DOWNLOAD
+# LOAD SPACY
 # =====================================================
 
-try:
-    nltk.data.find("tokenizers/punkt")
-except LookupError:
-    nltk.download("punkt")
-
-try:
-    nltk.data.find("tokenizers/punkt_tab")
-except LookupError:
-    nltk.download("punkt_tab")
+nlp = spacy.load("en_core_web_sm")
 
 
 # =====================================================
@@ -72,7 +62,7 @@ def normalize_text(text):
 
 
 # =====================================================
-# SENTENCE SPLITTING
+# ENGLISH SENTENCE SPLITTING (spaCy)
 # =====================================================
 
 def split_english_sentences(text):
@@ -81,18 +71,22 @@ def split_english_sentences(text):
     if not text:
         return []
 
-    sentences = sent_tokenize(text)
+    doc = nlp(text)
 
-    clean_sentences = []
+    sentences = []
 
-    for sentence in sentences:
-        sentence = sentence.strip()
+    for sent in doc.sents:
+        s = sent.text.strip()
 
-        if len(sentence) > 3:
-            clean_sentences.append(sentence)
+        if len(s) > 3:
+            sentences.append(s)
 
-    return clean_sentences
+    return sentences
 
+
+# =====================================================
+# MEITEI SENTENCE SPLITTING (IndicNLP)
+# =====================================================
 
 def split_meitei_sentences(text):
     text = normalize_text(text)
@@ -110,15 +104,15 @@ def split_meitei_sentences(text):
     except Exception:
         sentences = re.findall(r"[^꯫]+꯫", text)
 
-    clean_sentences = []
+    cleaned = []
 
     for sentence in sentences:
         sentence = sentence.strip()
 
-        if sentence and sentence.endswith("꯫"):
-            clean_sentences.append(sentence)
+        if sentence:
+            cleaned.append(sentence)
 
-    return clean_sentences
+    return cleaned
 
 
 # =====================================================
@@ -135,13 +129,10 @@ def tokenize_english_sentence(sentence):
 
 
 # =====================================================
-# FIND ENGLISH AND MANIPURI FILES
+# FIND FILES
 # =====================================================
 
 def find_language_file(author_folder, language):
-    """
-    Find English or Manipuri txt file automatically inside author folder.
-    """
 
     txt_files = list(author_folder.glob("*.txt"))
 
@@ -149,7 +140,7 @@ def find_language_file(author_folder, language):
         keywords = ["english", "eng", "en"]
 
     else:
-        keywords = ["manipuri", "meitei", "mtei", "mm", "mni"]
+        keywords = ["manipuri", "meitei", "mni", "mm", "mtei"]
 
     for txt_file in txt_files:
         name = txt_file.stem.lower()
@@ -171,25 +162,26 @@ def read_text_file(file_path):
 
 
 # =====================================================
-# PROCESS AUTHOR FOLDER
+# PROCESS AUTHOR
 # =====================================================
 
 def process_author_folder(author_folder):
-    print("\nProcessing author folder:", author_folder.name)
+
+    print(f"\nProcessing: {author_folder.name}")
 
     english_file = find_language_file(author_folder, "english")
     meitei_file = find_language_file(author_folder, "meitei")
 
     if english_file is None:
-        print("English file not found in:", author_folder.name)
+        print("English file not found.")
         return []
 
     if meitei_file is None:
-        print("Manipuri/Meitei file not found in:", author_folder.name)
+        print("Manipuri file not found.")
         return []
 
-    print("English file:", english_file.name)
-    print("Meitei file:", meitei_file.name)
+    print("English:", english_file.name)
+    print("Manipuri:", meitei_file.name)
 
     english_text = read_text_file(english_file)
     meitei_text = read_text_file(meitei_file)
@@ -198,26 +190,30 @@ def process_author_folder(author_folder):
     meitei_sentences = split_meitei_sentences(meitei_text)
 
     english_sentences = [
-        tokenize_english_sentence(sentence)
-        for sentence in english_sentences
+        tokenize_english_sentence(s)
+        for s in english_sentences
     ]
 
     meitei_sentences = [
-        tokenize_meitei_sentence(sentence)
-        for sentence in meitei_sentences
+        tokenize_meitei_sentence(s)
+        for s in meitei_sentences
     ]
 
-    max_len = max(len(english_sentences), len(meitei_sentences))
+    max_len = max(
+        len(english_sentences),
+        len(meitei_sentences)
+    )
 
     rows = []
 
     for i in range(max_len):
-        english_sentence = english_sentences[i] if i < len(english_sentences) else ""
-        meitei_sentence = meitei_sentences[i] if i < len(meitei_sentences) else ""
+
+        eng = english_sentences[i] if i < len(english_sentences) else ""
+        mni = meitei_sentences[i] if i < len(meitei_sentences) else ""
 
         rows.append({
-            "English Sentence": english_sentence,
-            "Meitei Sentence": meitei_sentence
+            "English Sentence": eng,
+            "Meitei Sentence": mni
         })
 
     print("English sentences:", len(english_sentences))
@@ -227,18 +223,17 @@ def process_author_folder(author_folder):
 
 
 # =====================================================
-# FORMAT EXCEL LIKE SCREENSHOT
+# FORMAT EXCEL
 # =====================================================
 
 def format_excel(excel_file):
+
     wb = load_workbook(excel_file)
     ws = wb.active
 
-    # Column width like screenshot
     ws.column_dimensions["A"].width = 90
     ws.column_dimensions["B"].width = 110
 
-    # Wrap text in every cell
     for row in ws.iter_rows():
         for cell in row:
             cell.alignment = Alignment(
@@ -246,7 +241,6 @@ def format_excel(excel_file):
                 vertical="top"
             )
 
-    # Adjust row height
     for row in range(1, ws.max_row + 1):
         ws.row_dimensions[row].height = 60
 
@@ -258,30 +252,22 @@ def format_excel(excel_file):
 # =====================================================
 
 def main():
+
     print("Current folder:", os.getcwd())
 
     if not DATA_DIR.exists():
         raise FileNotFoundError(
-            "\nData folder not found.\n"
-            "Create folder like this:\n"
-            "data/Author_Name/English.txt\n"
-            "data/Author_Name/Manipuri.txt"
+            "Create:\n"
+            "data/Author/English.txt\n"
+            "data/Author/Manipuri.txt"
         )
 
     OUTPUT_DIR.mkdir(exist_ok=True)
 
     author_folders = [
-        folder for folder in DATA_DIR.iterdir()
-        if folder.is_dir()
+        f for f in DATA_DIR.iterdir()
+        if f.is_dir()
     ]
-
-    if not author_folders:
-        raise FileNotFoundError(
-            "\nNo author folders found inside data folder.\n"
-            "Use this structure:\n"
-            "data/Author_Name/English.txt\n"
-            "data/Author_Name/Manipuri.txt"
-        )
 
     all_rows = []
 
@@ -290,26 +276,23 @@ def main():
         all_rows.extend(rows)
 
     if not all_rows:
-        print("\nNo output generated.")
+        print("No output generated.")
         return
 
     df = pd.DataFrame(all_rows)
 
-    excel_output = OUTPUT_DIR / "combined_parallel_sentences.xlsx"
+    output_file = OUTPUT_DIR / "combined_parallel_sentences.xlsx"
 
-    # header=False makes output exactly like screenshot:
-    # Column A = English sentence
-    # Column B = Meitei sentence
     df.to_excel(
-        excel_output,
+        output_file,
         index=False,
         header=False
     )
 
-    format_excel(excel_output)
+    format_excel(output_file)
 
     print("\nDone.")
-    print("Excel saved:", excel_output)
+    print("Saved:", output_file)
     print("Total rows:", len(all_rows))
 
 
